@@ -1,45 +1,43 @@
-module.exports = async (logSources, printer) => {
+module.exports = async (logSources, printer, concurrencyLimit = 5, batchSize = 10) => {
   try {
-    // Define a function to fetch the next log entry from a source
-    const getNextLogEntry = async (logSource) => {
-      const logEntry = await logSource.popAsync();
-      if (logEntry) {
-        return { source: logSource, entry: logEntry };
+    // Define a function to fetch the next batch of log entries from a source
+    const getNextLogBatch = async (logSource) => {
+      const logBatch = [];
+      for (let i = 0; i < batchSize; i++) {
+        const logEntry = await logSource.popAsync();
+        if (!logEntry) break; // Exit the loop if the source is drained
+        logBatch.push(logEntry);
       }
-      return null;
+      return logBatch;
     };
 
-    // Initialize the queue with the first log entry from each source
-    const initialLogEntries = await Promise.all(
-      logSources.map(async (logSource) => {
-        const logEntry = await getNextLogEntry(logSource);
-        return logEntry;
-      })
-    );
-
-    // Create a priority queue to keep track of the next log entry from each source
+    // Create a priority queue to keep track of the next log batch from each source
     const PriorityQueue = require("fastpriorityqueue");
-    const queue = new PriorityQueue((a, b) => a.entry.date - b.entry.date);
+    const queue = new PriorityQueue((a, b) => a.batch[0].date - b.batch[0].date);
 
-    // Add the initial log entries to the queue
-    initialLogEntries.forEach((logEntry) => {
-      if (logEntry) {
-        queue.add(logEntry);
+    // Initialize the queue with the first log batch from the first 'concurrencyLimit' sources
+    const initialSources = logSources.slice(0, concurrencyLimit);
+    for (const logSource of initialSources) {
+      const logBatch = await getNextLogBatch(logSource);
+      if (logBatch.length > 0) {
+        queue.add({ source: logSource, batch: logBatch });
       }
-    });
+    }
 
-    // Process and print log entries in chronological order
+    // Process and print log entries in chronological order with batch processing and parallelism control
     while (!queue.isEmpty()) {
-      const { source, entry } = queue.poll();
-      if (entry.date >= source.last.date) {
-        // Print the log entry only if it satisfies the condition
-        printer.print(entry);
+      const { source, batch } = queue.poll();
+      for (const logEntry of batch) {
+        if (logEntry.date >= source.last.date) {
+          // Print the log entry only if it satisfies the condition
+          printer.print(logEntry);
+        }
       }
 
-      // Fetch the next log entry from the source and add it to the queue
-      const nextLogEntry = await getNextLogEntry(source);
-      if (nextLogEntry) {
-        queue.add(nextLogEntry);
+      // Fetch the next log batch from the source and add it to the queue
+      const nextLogBatch = await getNextLogBatch(source);
+      if (nextLogBatch.length > 0) {
+        queue.add({ source, batch: nextLogBatch });
       }
     }
 
