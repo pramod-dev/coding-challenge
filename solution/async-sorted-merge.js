@@ -9,17 +9,24 @@ module.exports = async (logSources, printer) => {
       return null;
     };
 
+    // Initialize the queue with the first log entry from each source
+    const initialLogEntries = await Promise.all(
+      logSources.map(async (logSource) => {
+        const logEntry = await getNextLogEntry(logSource);
+        return logEntry;
+      })
+    );
+
     // Create a priority queue to keep track of the next log entry from each source
     const PriorityQueue = require("fastpriorityqueue");
     const queue = new PriorityQueue((a, b) => a.entry.date - b.entry.date);
 
-    // Initialize the queue with the first log entry from each source
-    for (const logSource of logSources) {
-      const logEntry = await getNextLogEntry(logSource);
+    // Add the initial log entries to the queue
+    initialLogEntries.forEach((logEntry) => {
       if (logEntry) {
         queue.add(logEntry);
       }
-    }
+    });
 
     // Process and print log entries in chronological order
     while (!queue.isEmpty()) {
