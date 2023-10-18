@@ -1,3 +1,5 @@
+"use strict";
+
 module.exports = async (logSources, printer, concurrencyLimit = 5, batchSize = 10) => {
   try {
     // Define a function to fetch the next batch of log entries from a source
@@ -27,10 +29,13 @@ module.exports = async (logSources, printer, concurrencyLimit = 5, batchSize = 1
     // Process and print log entries in chronological order with batch processing and parallelism control
     while (!queue.isEmpty()) {
       const { source, batch } = queue.poll();
+      let lastLogEntryDate = source.last ? source.last.date : new Date(0);
+
       for (const logEntry of batch) {
-        if (logEntry.date >= source.last.date) {
-          // Print the log entry only if it satisfies the condition
+        if (logEntry.date >= lastLogEntryDate) {
+          // Print the log entry only if it satisfies the chronological order condition
           printer.print(logEntry);
+          lastLogEntryDate = logEntry.date; // Update the last processed log entry date
         }
       }
 
